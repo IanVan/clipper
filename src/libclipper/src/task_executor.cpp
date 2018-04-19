@@ -9,11 +9,55 @@
 #include <clipper/task_executor.hpp>
 #include <clipper/util.hpp>
 
+constexpr long MY_PREDICTION_CACHE_SIZE_BYTES = 33554432;
+
 namespace clipper {
 
 CacheEntry::CacheEntry() {}
 
-PredictionCache::PredictionCache(size_t size_bytes)
+PredictionCacheWrapper::PredictionCacheWrapper(size_t size_bytes)
+    : cache1_(std::make_unique<PredictionCache>(MY_PREDICTION_CACHE_SIZE_BYTES)),
+      cache2_(std::make_unique<PredictionCache>(MY_PREDICTION_CACHE_SIZE_BYTES)),
+      max_size_bytes_(size_bytes) {
+  lookups_counter_ = metrics::MetricsRegistry::get_metrics().create_counter(
+      "internal:prediction_cache_lookups_wrapper");
+  hit_ratio_ = metrics::MetricsRegistry::get_metrics().create_ratio_counter(
+      "internal:prediction_cache_hit_ratio_wrapper");
+  modelName1 = "random-output";
+}
+
+folly::Future<Output> PredictionCacheWrapper::fetch(
+    const VersionedModelId &model, const std::shared_ptr<Input> &input) {
+  if (model.get_name().compare(modelName1)) {
+    log_info_formatted("CONTAINER",
+                             "called fetch in cache 1 for model name: {} and id {}",
+                             model.get_name(),
+                             model.get_id());
+    return cache1_->fetch(model,input);
+  }
+  else {
+    log_info_formatted("CONTAINER",
+                             "called fetch in cache 2 for model name: {} and id {}",
+                             model.get_name(),
+                             model.get_id());
+    return cache2_->fetch(model,input);
+  }
+}
+
+void PredictionCacheWrapper::put(const VersionedModelId &model,
+                          const std::shared_ptr<Input> &input,
+                          const Output &output) {
+  if (model.get_name().compare(modelName1)) {
+    cache1_->put(model,input,output);
+  }
+  else {
+    cache2_->put(model,input,output);
+  }
+}
+
+
+
+PredictionCache::PredictionCache(size_t size_bytes) 
     : max_size_bytes_(size_bytes) {
   lookups_counter_ = metrics::MetricsRegistry::get_metrics().create_counter(
       "internal:prediction_cache_lookups");

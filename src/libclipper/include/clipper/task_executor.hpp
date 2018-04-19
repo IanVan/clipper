@@ -103,6 +103,25 @@ class PredictionCache {
   std::shared_ptr<metrics::RatioCounter> hit_ratio_;
 };
 
+class PredictionCacheWrapper {
+  public:
+  PredictionCacheWrapper(size_t size_bytes);
+  folly::Future<Output> fetch(const VersionedModelId &model,
+                              const std::shared_ptr<Input> &input);
+
+  void put(const VersionedModelId &model, const std::shared_ptr<Input> &input,
+           const Output &output);
+
+ private:
+  std::unique_ptr<PredictionCache> cache1_;
+  std::unique_ptr<PredictionCache> cache2_;
+  const size_t max_size_bytes_;
+  size_t size_bytes_ = 0;
+  std::shared_ptr<metrics::Counter> lookups_counter_;
+  std::shared_ptr<metrics::RatioCounter> hit_ratio_;
+  std::string modelName1;
+};
+
 struct DeadlineCompare {
   bool operator()(const std::pair<Deadline, PredictTask> &lhs,
                   const std::pair<Deadline, PredictTask> &rhs) {
@@ -217,11 +236,12 @@ class TaskExecutor {
       : active_(std::make_shared<std::atomic_bool>(true)),
         active_containers_(std::make_shared<ActiveContainers>()),
         rpc_(std::make_unique<rpc::RPCService>()),
-        cache_(std::make_unique<PredictionCache>(
-            get_config().get_prediction_cache_size())),
+        cache_(std::make_unique<PredictionCacheWrapper>(33554432)),
+            //get_config().get_prediction_cache_size())),
         model_queues_({}),
         model_metrics_({}) {
-    log_info(LOGGING_TAG_TASK_EXECUTOR, "TaskExecutor started");
+    //get_config().set_prediction_cache_size(33554432);
+    log_info(LOGGING_TAG_TASK_EXECUTOR, "TaskExecutor started Ian");
     rpc_->start(
         "*", RPC_SERVICE_PORT, [ this, task_executor_valid = active_ ](
                                    VersionedModelId model, int replica_id) {
@@ -241,6 +261,7 @@ class TaskExecutor {
                      "Not running on_response_recv callback because "
                      "TaskExecutor has been destroyed.");
           }
+
         });
     Config &conf = get_config();
     while (!redis_connection_.connect(conf.get_redis_address(),
@@ -322,6 +343,7 @@ class TaskExecutor {
                      "subscribe_to_container_changes callback because "
                      "TaskExecutor has been destroyed.");
           }
+
         });
     throughput_meter_ = metrics::MetricsRegistry::get_metrics().create_meter(
         "internal:aggregate_model_throughput");
@@ -391,7 +413,7 @@ class TaskExecutor {
   std::shared_ptr<std::atomic_bool> active_;
   std::shared_ptr<ActiveContainers> active_containers_;
   std::unique_ptr<rpc::RPCService> rpc_;
-  std::unique_ptr<PredictionCache> cache_;
+  std::unique_ptr<PredictionCacheWrapper> cache_;
   redox::Redox redis_connection_;
   redox::Subscriber redis_subscriber_;
   std::mutex inflight_messages_mutex_;

@@ -135,23 +135,46 @@ class DockerContainerManager(ContainerManager):
             redis_ip=self.redis_ip,
             redis_port=self.redis_port,
             cache_size=cache_size)
+
         query_labels = self.common_labels.copy()
         query_labels[CLIPPER_QUERY_FRONTEND_CONTAINER_LABEL] = ""
         query_container_id = random.randint(0, 100000)
         query_name = "query_frontend-{}".format(query_container_id)
-        self.docker_client.containers.run(
-            query_frontend_image,
-            query_cmd,
-            name=query_name,
-            ports={
+        logger.info("Running query frontend")
+        logger.info(query_frontend_image)
+        logger.info(query_cmd)
+        logger.info(query_name)
+        ports2={
                 '%s/tcp' % CLIPPER_INTERNAL_QUERY_PORT:
                 self.clipper_query_port,
                 '%s/tcp' % CLIPPER_INTERNAL_RPC_PORT: self.clipper_rpc_port
-            },
-            labels=query_labels,
-            **self.extra_container_kwargs)
+            }
+        logger.info(ports2)
+        logger.info(query_labels)
+        try:
+            run_result = self.docker_client.containers.run(
+                query_frontend_image,
+                query_cmd,
+                name=query_name,
+                ports={
+                    '%s/tcp' % CLIPPER_INTERNAL_QUERY_PORT:
+                    self.clipper_query_port,
+                    '%s/tcp' % CLIPPER_INTERNAL_RPC_PORT: self.clipper_rpc_port
+                },
+                labels=query_labels,
+                **self.extra_container_kwargs)
+        except docker.errors.ContainerError as e:
+            logger.info("Container exited w/error.")
+        except docker.errors.ImageNotFound as e:
+            logger.info("Image not found")
+        except docker.errors.APIError as e:
+            logger.info("API error")
+            raise e
+
+        print(run_result)
 
         # Metric Section
+        logger.info("Starting metrics")
         query_frontend_metric_name = "query_frontend_exporter-{}".format(
             query_container_id)
         run_query_frontend_metric_image(
@@ -163,6 +186,7 @@ class DockerContainerManager(ContainerManager):
                          self.prometheus_port, self.extra_container_kwargs)
 
         self.connect()
+        logger.info("All done")
 
     def connect(self):
         # No extra connection steps to take on connection
