@@ -27,6 +27,8 @@ namespace clipper {
 
 const std::string LOGGING_TAG_TASK_EXECUTOR = "TASKEXECUTOR";
 
+enum class Policy {clock, rand, lifo};
+
 class ModelMetrics {
  public:
   explicit ModelMetrics(VersionedModelId model)
@@ -80,7 +82,7 @@ using CachePage = std::pair<long, long>;
 
 class PredictionCache {
  public:
-  PredictionCache(size_t size_bytes);
+  PredictionCache(size_t size_bytes, Policy policy_name);
   folly::Future<Output> fetch(const VersionedModelId &model,
                               const std::shared_ptr<Input> &input);
 
@@ -99,8 +101,10 @@ class PredictionCache {
   std::unordered_map<long, CacheEntry> entries_;
   std::vector<long> page_buffer_;
   size_t page_buffer_index_ = 0;
+  size_t page_buffer_evict_pos_ = 0;
   std::shared_ptr<metrics::Counter> lookups_counter_;
   std::shared_ptr<metrics::RatioCounter> hit_ratio_;
+  Policy replacement_policy_;
 };
 
 class PredictionCacheWrapper {

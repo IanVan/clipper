@@ -16,8 +16,8 @@ namespace clipper {
 CacheEntry::CacheEntry() {}
 
 PredictionCacheWrapper::PredictionCacheWrapper(size_t size_bytes)
-    : cache1_(std::make_unique<PredictionCache>(MY_PREDICTION_CACHE_SIZE_BYTES)),
-      cache2_(std::make_unique<PredictionCache>(MY_PREDICTION_CACHE_SIZE_BYTES)),
+    : cache1_(std::make_unique<PredictionCache>(MY_PREDICTION_CACHE_SIZE_BYTES, Policy::rand)),
+      cache2_(std::make_unique<PredictionCache>(0, Policy::rand)),
       max_size_bytes_(size_bytes) {
   lookups_counter_ = metrics::MetricsRegistry::get_metrics().create_counter(
       "internal:prediction_cache_lookups_wrapper");
@@ -57,8 +57,9 @@ void PredictionCacheWrapper::put(const VersionedModelId &model,
 
 
 
-PredictionCache::PredictionCache(size_t size_bytes) 
-    : max_size_bytes_(size_bytes) {
+PredictionCache::PredictionCache(size_t size_bytes, Policy policy_name) 
+    : max_size_bytes_(size_bytes),
+      replacement_policy_(policy_name) {
   lookups_counter_ = metrics::MetricsRegistry::get_metrics().create_counter(
       "internal:prediction_cache_lookups");
   hit_ratio_ = metrics::MetricsRegistry::get_metrics().create_ratio_counter(
@@ -151,24 +152,62 @@ void PredictionCache::evict_entries(long space_needed_bytes) {
     return;
   }
   while (space_needed_bytes > 0 && !page_buffer_.empty()) {
-    long page_key = page_buffer_[page_buffer_index_];
-    auto page_entry_search = entries_.find(page_key);
-    if (page_entry_search == entries_.end()) {
-      throw std::runtime_error(
-          "Failed to find corresponding cache entry for a buffer page!");
+    if (replacement_policy_ == Policy::clock) {
+      long page_key = page_buffer_[page_buffer_index_];
+      auto page_entry_search = entries_.find(page_key);
+      if (page_entry_search == entries_.end()) {
+        throw std::runtime_error(
+            "Failed to find corresponding cache entry for a buffer page!");
+      }
+      CacheEntry &page_entry = page_entry_search->second;
+      if (page_entry.used_ || !page_entry.completed_) {
+        page_entry.used_ = false;
+        page_buffer_index_ = (page_buffer_index_ + 1) % page_buffer_.size();
+      } else {
+        page_buffer_.erase(page_buffer_.begin() + page_buffer_index_);
+        page_buffer_index_ = page_buffer_.size() > 0
+                                 ? page_buffer_index_ % page_buffer_.size()
+                                 : 0;
+        size_bytes_ -= page_entry.value_.y_hat_.size();
+        space_needed_bytes -= page_entry.value_.y_hat_.size();
+        entries_.erase(page_entry_search);
+      }
+    } else if (replacement_policy_ == Policy::lifo) {
+      long page_key = page_buffer_[page_buffer_evict_pos_];
+      auto page_entry_search = entries_.find(page_key);
+      if (page_entry_search == entries_.end()) {
+        throw std::runtime_error(
+            "Failed to find corresponding cache entry for a buffer page!");
+      }
+      CacheEntry &page_entry = page_entry_search->second;
+      if (!page_entry.completed_) {
+        page_buffer_evict_pos_ = (page_buffer_evict_pos_ + 1) % page_buffer_.size();
+      } else {
+        page_buffer_.erase(page_buffer_.begin() + page_buffer_evict_pos_);
+        page_buffer_evict_pos_ = page_buffer_.size() > 0
+                                 ? page_buffer_evict_pos_ % page_buffer_.size()
+                                 : 0;
+        size_bytes_ -= page_entry.value_.y_hat_.size();
+        space_needed_bytes -= page_entry.value_.y_hat_.size();
+        entries_.erase(page_entry_search);
+      }
     }
-    CacheEntry &page_entry = page_entry_search->second;
-    if (page_entry.used_ || !page_entry.completed_) {
-      page_entry.used_ = false;
-      page_buffer_index_ = (page_buffer_index_ + 1) % page_buffer_.size();
-    } else {
-      page_buffer_.erase(page_buffer_.begin() + page_buffer_index_);
-      page_buffer_index_ = page_buffer_.size() > 0
-                               ? page_buffer_index_ % page_buffer_.size()
-                               : 0;
-      size_bytes_ -= page_entry.value_.y_hat_.size();
-      space_needed_bytes -= page_entry.value_.y_hat_.size();
-      entries_.erase(page_entry_search);
+    else {
+      //Random replacement
+      size_t rand_page_index_ = std::rand() % page_buffer_.size();
+      long page_key = page_buffer_[rand_page_index_];
+      auto page_entry_search = entries_.find(page_key);
+      if (page_entry_search == entries_.end()) {
+        throw std::runtime_error(
+            "Failed to find corresponding cache entry for a buffer page!");
+      }
+      CacheEntry &page_entry = page_entry_search->second;
+      if (page_entry.completed_) {
+        page_buffer_.erase(page_buffer_.begin() + rand_page_index_);
+        size_bytes_ -= page_entry.value_.y_hat_.size();
+        space_needed_bytes -= page_entry.value_.y_hat_.size();
+        entries_.erase(page_entry_search);
+      }
     }
   }
 }
