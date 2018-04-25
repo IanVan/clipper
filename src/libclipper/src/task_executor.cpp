@@ -10,6 +10,7 @@
 #include <clipper/util.hpp>
 
 constexpr long MY_PREDICTION_CACHE_SIZE_BYTES = 33554432;
+const int INTERVAL = 100;
 
 namespace clipper {
 
@@ -23,11 +24,17 @@ PredictionCacheWrapper::PredictionCacheWrapper(size_t size_bytes)
       "internal:prediction_cache_lookups_wrapper");
   hit_ratio_ = metrics::MetricsRegistry::get_metrics().create_ratio_counter(
       "internal:prediction_cache_hit_ratio_wrapper");
-  modelName1 = "random-output";
+  modelName1 = "model1";
 }
 
 folly::Future<Output> PredictionCacheWrapper::fetch(
     const VersionedModelId &model, const std::shared_ptr<Input> &input) {
+  lookups_counter_->increment(1);
+  if ((lookups_counter_->value())%INTERVAL == 0) {
+    CacheChange dec1 = cache1_->cacheDecision();
+    CacheChange dec2 = cache2_->cacheDecision();
+    //growing function
+  }
   if (model.get_name().compare(modelName1)) {
     log_info_formatted("CONTAINER",
                              "called fetch in cache 1 for model name: {} and id {}",
@@ -44,6 +51,7 @@ folly::Future<Output> PredictionCacheWrapper::fetch(
   }
 }
 
+
 void PredictionCacheWrapper::put(const VersionedModelId &model,
                           const std::shared_ptr<Input> &input,
                           const Output &output) {
@@ -56,7 +64,6 @@ void PredictionCacheWrapper::put(const VersionedModelId &model,
 }
 
 
-
 PredictionCache::PredictionCache(size_t size_bytes, Policy policy_name) 
     : max_size_bytes_(size_bytes),
       replacement_policy_(policy_name) {
@@ -64,6 +71,24 @@ PredictionCache::PredictionCache(size_t size_bytes, Policy policy_name)
       "internal:prediction_cache_lookups");
   hit_ratio_ = metrics::MetricsRegistry::get_metrics().create_ratio_counter(
       "internal:prediction_cache_hit_ratio");
+}
+
+CacheChange PredictionCache::cacheDecision() {
+  double delta = hit_ratio_->get_ratio() - prevHitRatio;
+  double absDelta = std::abs(delta);
+  if (absDelta < 0.025) {
+    return CacheChange::steady;
+  }
+  else if (delta < 0) {
+    switch(prevEpoch) {
+      case(increase) : return decrease;
+      case(steady) : return increase;
+      case(decrease) : return steady;
+    }
+  }
+  else {
+    return prevEpoch;
+  }
 }
 
 folly::Future<Output> PredictionCache::fetch(

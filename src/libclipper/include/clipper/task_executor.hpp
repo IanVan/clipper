@@ -28,6 +28,7 @@ namespace clipper {
 const std::string LOGGING_TAG_TASK_EXECUTOR = "TASKEXECUTOR";
 
 enum class Policy {clock, rand, lifo};
+typedef enum CacheChange {increase, decrease, steady} CacheChange;
 
 class ModelMetrics {
  public:
@@ -88,6 +89,12 @@ class PredictionCache {
 
   void put(const VersionedModelId &model, const std::shared_ptr<Input> &input,
            const Output &output);
+  CacheChange cacheDecision();
+  std::shared_ptr<metrics::Counter> lookups_counter_;
+  std::shared_ptr<metrics::RatioCounter> hit_ratio_;
+  CacheChange prevEpoch = steady;
+  int prevLookUp = 0;
+  double prevHitRatio = 0;
 
  private:
   size_t hash(const VersionedModelId &model, size_t input_hash) const;
@@ -102,8 +109,6 @@ class PredictionCache {
   std::vector<long> page_buffer_;
   size_t page_buffer_index_ = 0;
   size_t page_buffer_evict_pos_ = 0;
-  std::shared_ptr<metrics::Counter> lookups_counter_;
-  std::shared_ptr<metrics::RatioCounter> hit_ratio_;
   Policy replacement_policy_;
 };
 
