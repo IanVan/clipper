@@ -11,7 +11,7 @@
 
 constexpr long MY_PREDICTION_CACHE_SIZE_BYTES = 33554432;
 const int INTERVAL = 100;
-constexpr long RESIZE_FACTOR = 4096;
+constexpr long RESIZE_FACTOR = 1024;
 
 namespace clipper {
 
@@ -65,13 +65,48 @@ void PredictionCacheWrapper::put(const VersionedModelId &model,
   }
 }
 
-void PredictionCacheWrapper::grow(std::priority_queue<PredictionCache> grow_caches) {
-  long new_bytes = 0;
-  while ()
+void PredictionCacheWrapper::grow() {
+  if (total_bytes == max_size_bytes_) {
+    return;
+  }
+  if (cache2_->prevEpoch == increase && 
+      cache1_->prevEpoch == increase && 
+      (total_bytes + RESIZE_FACTOR * 2) > max_size_bytes_) {
+    if (cache1_->lookups_counter_->value() > cache2_->lookups_counter_->value()) {
+      if ((RESIZE_FACTOR + total_bytes) < max_size_bytes_) {
+        cache1_->max_size_bytes_ += RESIZE_FACTOR;
+        total_bytes += RESIZE_FACTOR;
+        return;
+      }
+    }
+    else {
+      if ((RESIZE_FACTOR + total_bytes) <= max_size_bytes_) {
+        cache2_->max_size_bytes_ += RESIZE_FACTOR;
+        total_bytes += RESIZE_FACTOR;
+        return;
+      }
+    }
+  }
+  if (cache1_->prevEpoch == increase && (total_bytes + RESIZE_FACTOR <= max_size_bytes_ )){
+    cache1_->max_size_bytes_ += RESIZE_FACTOR;
+    total_bytes += RESIZE_FACTOR;
+  }
+  if (cache2_->prevEpoch == increase && (total_bytes + RESIZE_FACTOR <= max_size_bytes_ )){
+    cache2_->max_size_bytes_ += RESIZE_FACTOR;
+    total_bytes += RESIZE_FACTOR;
+  }
+  return;
 }
 
 void PredictionCacheWrapper::shrink() {
-
+  if (cache1_->prevEpoch == decrease) {
+    cache1_->max_size_bytes_ -= RESIZE_FACTOR;
+    total_bytes -= RESIZE_FACTOR;
+  }
+  if (cache2_->prevEpoch == decrease) {
+    cache2_->max_size_bytes_ -= RESIZE_FACTOR;
+    total_bytes -= RESIZE_FACTOR;
+  }
 }
 
 PredictionCache::PredictionCache(size_t size_bytes, Policy policy_name) 

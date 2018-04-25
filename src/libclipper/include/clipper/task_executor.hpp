@@ -95,6 +95,7 @@ class PredictionCache {
   CacheChange prevEpoch = steady;
   int prevLookUp = 0;
   double prevHitRatio = 0;
+  size_t max_size_bytes_;
 
  private:
   size_t hash(const VersionedModelId &model, size_t input_hash) const;
@@ -102,7 +103,6 @@ class PredictionCache {
   void evict_entries(long space_needed_bytes);
 
   std::mutex m_;
-  const size_t max_size_bytes_;
   size_t size_bytes_ = 0;
   // TODO cache needs a promise as well?
   std::unordered_map<long, CacheEntry> entries_;
@@ -121,15 +121,17 @@ class PredictionCacheWrapper {
   void put(const VersionedModelId &model, const std::shared_ptr<Input> &input,
            const Output &output);
 
+  void grow();
+  void shrink();
+
  private:
   std::unique_ptr<PredictionCache> cache1_;
   std::unique_ptr<PredictionCache> cache2_;
   const size_t max_size_bytes_;
-  size_t size_bytes_ = 0;
   std::shared_ptr<metrics::Counter> lookups_counter_;
   std::shared_ptr<metrics::RatioCounter> hit_ratio_;
   std::string modelName1;
-  long total_bytes_;
+  unsigned long total_bytes;
 };
 
 struct DeadlineCompare {
