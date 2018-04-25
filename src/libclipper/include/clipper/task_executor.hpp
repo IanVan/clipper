@@ -129,6 +129,7 @@ class PredictionCacheWrapper {
   std::shared_ptr<metrics::Counter> lookups_counter_;
   std::shared_ptr<metrics::RatioCounter> hit_ratio_;
   std::string modelName1;
+  long total_bytes_;
 };
 
 struct DeadlineCompare {

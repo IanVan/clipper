@@ -11,6 +11,7 @@
 
 constexpr long MY_PREDICTION_CACHE_SIZE_BYTES = 33554432;
 const int INTERVAL = 100;
+constexpr long RESIZE_FACTOR = 4096;
 
 namespace clipper {
 
@@ -20,6 +21,7 @@ PredictionCacheWrapper::PredictionCacheWrapper(size_t size_bytes)
     : cache1_(std::make_unique<PredictionCache>(MY_PREDICTION_CACHE_SIZE_BYTES, Policy::rand)),
       cache2_(std::make_unique<PredictionCache>(0, Policy::rand)),
       max_size_bytes_(size_bytes) {
+  total_bytes = MY_PREDICTION_CACHE_SIZE_BYTES + 0;
   lookups_counter_ = metrics::MetricsRegistry::get_metrics().create_counter(
       "internal:prediction_cache_lookups_wrapper");
   hit_ratio_ = metrics::MetricsRegistry::get_metrics().create_ratio_counter(
@@ -63,6 +65,14 @@ void PredictionCacheWrapper::put(const VersionedModelId &model,
   }
 }
 
+void PredictionCacheWrapper::grow(std::priority_queue<PredictionCache> grow_caches) {
+  long new_bytes = 0;
+  while ()
+}
+
+void PredictionCacheWrapper::shrink() {
+
+}
 
 PredictionCache::PredictionCache(size_t size_bytes, Policy policy_name) 
     : max_size_bytes_(size_bytes),
