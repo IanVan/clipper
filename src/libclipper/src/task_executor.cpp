@@ -9,19 +9,19 @@
 #include <clipper/task_executor.hpp>
 #include <clipper/util.hpp>
 
-constexpr long MY_PREDICTION_CACHE_SIZE_BYTES = 33554432;
+constexpr long MY_PREDICTION_CACHE_SIZE_BYTES = 213000;
 const int INTERVAL = 100;
-constexpr long RESIZE_FACTOR = 1024;
+constexpr long RESIZE_FACTOR = 4096;
 
 namespace clipper {
 
 CacheEntry::CacheEntry() {}
 
 PredictionCacheWrapper::PredictionCacheWrapper(size_t size_bytes)
-    : cache1_(std::make_unique<PredictionCache>(MY_PREDICTION_CACHE_SIZE_BYTES, Policy::rand)),
-      cache2_(std::make_unique<PredictionCache>(0, Policy::rand)),
+    : cache1_(std::make_unique<PredictionCache>(MY_PREDICTION_CACHE_SIZE_BYTES, Policy::clock)),
+      cache2_(std::make_unique<PredictionCache>(MY_PREDICTION_CACHE_SIZE_BYTES, Policy::clock)),
       max_size_bytes_(size_bytes) {
-  total_bytes = MY_PREDICTION_CACHE_SIZE_BYTES + 0;
+  total_bytes = MY_PREDICTION_CACHE_SIZE_BYTES + MY_PREDICTION_CACHE_SIZE_BYTES;
   lookups_counter_ = metrics::MetricsRegistry::get_metrics().create_counter(
       "internal:prediction_cache_lookups_wrapper");
   hit_ratio_ = metrics::MetricsRegistry::get_metrics().create_ratio_counter(
@@ -35,7 +35,8 @@ folly::Future<Output> PredictionCacheWrapper::fetch(
   if ((lookups_counter_->value())%INTERVAL == 0) {
     CacheChange dec1 = cache1_->cacheDecision();
     CacheChange dec2 = cache2_->cacheDecision();
-    //growing function
+    shrink();
+    grow();
   }
   if (model.get_name().compare(modelName1)) {
     log_info_formatted("CONTAINER",
@@ -121,7 +122,7 @@ PredictionCache::PredictionCache(size_t size_bytes, Policy policy_name)
 CacheChange PredictionCache::cacheDecision() {
   double delta = hit_ratio_->get_ratio() - prevHitRatio;
   double absDelta = std::abs(delta);
-  if (absDelta < 0.025) {
+  if (absDelta < 0.001) {
     return CacheChange::steady;
   }
   else if (delta < 0) {
@@ -132,7 +133,11 @@ CacheChange PredictionCache::cacheDecision() {
     }
   }
   else {
-    return prevEpoch;
+    switch(prevEpoch) {
+      case(increase) : return increase;
+      case(steady) : return steady;
+      case(decrease) : return decrease;
+    }
   }
 }
 
@@ -257,6 +262,9 @@ void PredictionCache::evict_entries(long space_needed_bytes) {
         page_buffer_evict_pos_ = page_buffer_.size() > 0
                                  ? page_buffer_evict_pos_ % page_buffer_.size()
                                  : 0;
+        page_buffer_index_ = page_buffer_.size() > 0
+                         ? page_buffer_index_ % page_buffer_.size()
+                         : 0;
         size_bytes_ -= page_entry.value_.y_hat_.size();
         space_needed_bytes -= page_entry.value_.y_hat_.size();
         entries_.erase(page_entry_search);
@@ -274,6 +282,9 @@ void PredictionCache::evict_entries(long space_needed_bytes) {
       CacheEntry &page_entry = page_entry_search->second;
       if (page_entry.completed_) {
         page_buffer_.erase(page_buffer_.begin() + rand_page_index_);
+        page_buffer_index_ = page_buffer_.size() > 0
+                         ? page_buffer_index_ % page_buffer_.size()
+                         : 0;
         size_bytes_ -= page_entry.value_.y_hat_.size();
         space_needed_bytes -= page_entry.value_.y_hat_.size();
         entries_.erase(page_entry_search);
